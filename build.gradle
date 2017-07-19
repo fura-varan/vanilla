@@ -27,8 +27,12 @@ android {
 
     defaultConfig {
         applicationId "ch.blinkenlights.android.vanilla"
-        minSdkVersion 15
+        minSdkVersion 23
         targetSdkVersion 25
+    }
+
+    dependencies {
+        compile 'org.jflac:jflac-codec:1.5.2'
     }
 
     sourceSets {

@@ -25,24 +25,26 @@ import android.media.MediaPlayer;
 import android.media.audiofx.AudioEffect;
 import android.os.Build;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 
-public class VanillaMediaPlayer extends MediaPlayer {
+public class VanillaMediaPlayer {
 
 	private Context mContext;
 	private String mDataSource;
-	private boolean mHasNextMediaPlayer;
 	private float mReplayGain = Float.NaN;
 	private float mDuckingFactor = Float.NaN;
 	private boolean mIsDucking = false;
 
+	private VanillaMediaPlayer mNextMediaPlayer = null;
+
+	private Decoder mDecoder;
+
 	/**
 	 * Constructs a new VanillaMediaPlayer class
 	 */
-	public VanillaMediaPlayer(Context context) {
-		super();
+	public VanillaMediaPlayer(Context context, int sessionId) {
 		mContext = context;
+		mDecoder = new Decoder(sessionId);
 	}
 
 	/**
@@ -50,8 +52,8 @@ public class VanillaMediaPlayer extends MediaPlayer {
 	 */
 	public void reset() {
 		mDataSource = null;
-		mHasNextMediaPlayer = false;
-		super.reset();
+		mNextMediaPlayer = null;
+		mDecoder.stop();
 	}
 
 	/**
@@ -59,21 +61,16 @@ public class VanillaMediaPlayer extends MediaPlayer {
 	 */
 	public void release() {
 		mDataSource = null;
-		mHasNextMediaPlayer = false;
-		super.release();
+		mNextMediaPlayer = null;
+		mDecoder.stop();
 	}
 
 	/**
 	 * Sets the data source to use
 	 */
-	public void setDataSource(String path) throws IOException, IllegalArgumentException, SecurityException, IllegalStateException {
-		// The MediaPlayer function expects a file:// like string but also accepts *most* absolute unix paths (= paths with no colon)
-		// We could therefore encode the path into a full URI, but a much quicker way is to simply use
-		// setDataSource(FileDescriptor) as the framework code would end up calling this function anyways (MediaPlayer.java:1100 (6.0))
-		FileInputStream fis = new FileInputStream(path);
-		super.setDataSource(fis.getFD());
-		fis.close(); // this is OK according to the SDK documentation!
+	public void setDataSource(String path) throws IOException {
 		mDataSource = path;
+		mDecoder.setSource(mDataSource);
 	}
 
 	/**
@@ -88,8 +85,7 @@ public class VanillaMediaPlayer extends MediaPlayer {
 	 */
 	@TargetApi(Build.VERSION_CODES.JELLY_BEAN)
 	public void setNextMediaPlayer(VanillaMediaPlayer next) {
-		super.setNextMediaPlayer(next);
-		mHasNextMediaPlayer = (next != null);
+		mNextMediaPlayer = next;
 	}
 
 	/**
@@ -97,7 +93,7 @@ public class VanillaMediaPlayer extends MediaPlayer {
 	 * via setNextMediaPlayer(next)
 	 */
 	public boolean hasNextMediaPlayer() {
-		return mHasNextMediaPlayer;
+		return mNextMediaPlayer != null;
 	}
 
 	/**
@@ -163,7 +159,79 @@ public class VanillaMediaPlayer extends MediaPlayer {
 			volume *= mDuckingFactor;
 		}
 
-		setVolume(volume, volume);
+		mDecoder.setVolume(volume);
 	}
 
+	public void setOnCompletionListener(MediaPlayer.OnCompletionListener listener) {
+		mDecoder.setOnCompletionListener(listener);
+	}
+
+	public void setOnErrorListener(MediaPlayer.OnErrorListener listener) {
+		mDecoder.setOnErrorListener(listener);
+	}
+
+	public int getCurrentPosition() {
+		return mDecoder.getCurrentPosition();
+	}
+
+	public void start() {
+		mDecoder.play();
+	}
+
+	public void pause() {
+		mDecoder.pause();
+	}
+
+	public void stop() {
+		mDecoder.stop();
+	}
+
+	public boolean isPlaying() {
+		return mDecoder.isPlaying();
+	}
+
+	public void seekTo(int position) {
+		mDecoder.seekTo(position);
+
+	}
+
+	public int getDuration() {
+		return mDecoder.getDuration();
+	}
+
+	public int getSampleRate() {
+		return mDecoder.getSampleRate();
+	}
+
+	public int getPlaybackRate() {
+		return mDecoder.getPlaybackRate();
+	}
+
+	public String getBitsPerSample() {
+		return mDecoder.getBitsPerSample();
+	}
+
+	public String getPlaybackBitsPerSample() {
+		return mDecoder.getPlaybackBitsPerSample();
+	}
+
+	public int getAudioSessionId() {
+		return mDecoder.getAudioSessionId();
+	}
+
+	public void setAudioSessionId(int id) {
+		mDecoder.setAudioSessionId(id);
+	}
+
+	public void setAudioStreamType(int id) {
+		// do nothing
+	}
+
+	public void prepare() {
+		// do nothing
+	}
+
+	public void setmOnErrorListener(MediaPlayer.OnErrorListener listener) {
+		mDecoder.setOnErrorListener(listener);
+	}
 }

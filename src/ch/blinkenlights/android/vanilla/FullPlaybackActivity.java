@@ -65,6 +65,7 @@ public class FullPlaybackActivity extends SlidingPlaybackActivity
 	private TextView mTitle;
 	private TextView mAlbum;
 	private TextView mArtist;
+	private TextView mQuality;
 
 	/**
 	 * True if the controls are visible (play, next, seek bar, etc).
@@ -153,6 +154,7 @@ public class FullPlaybackActivity extends SlidingPlaybackActivity
 		mTitle = (TextView)findViewById(R.id.title);
 		mAlbum = (TextView)findViewById(R.id.album);
 		mArtist = (TextView)findViewById(R.id.artist);
+		mQuality = (TextView) findViewById(R.id.quality);
 
 		mControlsTop = findViewById(R.id.controls_top);
 		mQueuePosView = (TextView)findViewById(R.id.queue_pos);
@@ -241,6 +243,21 @@ public class FullPlaybackActivity extends SlidingPlaybackActivity
 
 		if (mQueuePosView != null)
 			updateQueuePosition();
+	}
+
+	@Override
+	public void onResume() {
+		super.onResume();
+		if (mQuality != null) {
+			PlaybackService service = PlaybackService.get(this);
+			int songSampleRate = service.getSampleRate();
+			String songBitRate = service.getBitsPerSample();
+			int playbackSampleRate = service.getPlaybackRate();
+			String playbackBitRate = service.getPlaybackBitsPerSample();
+			String msg = "File: " + songSampleRate + "Hz/" + songBitRate;
+			msg += " -> Output: " + playbackSampleRate + "Hz/" + playbackBitRate;
+			mQuality.setText(msg);
+		}
 	}
 
 	@Override

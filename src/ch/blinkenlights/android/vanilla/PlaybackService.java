@@ -431,6 +431,7 @@ public final class PlaybackService extends Service
 		mTimeline.setCallback(this);
 		int state = loadState();
 
+		mAudioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
 		mMediaPlayer = getNewMediaPlayer();
 		mPreparedMediaPlayer = getNewMediaPlayer();
 		// We only have a single audio session
@@ -440,7 +441,6 @@ public final class PlaybackService extends Service
 		mReadahead = new ReadaheadThread();
 
 		mNotificationManager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
-		mAudioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
 
 		SharedPreferences settings = getSettings(this);
 		settings.registerOnSharedPreferenceChangeListener(this);
@@ -612,7 +612,7 @@ public final class PlaybackService extends Service
 	 * Returns a new MediaPlayer object
 	 */
 	private VanillaMediaPlayer getNewMediaPlayer() {
-		VanillaMediaPlayer mp = new VanillaMediaPlayer(this);
+		VanillaMediaPlayer mp = new VanillaMediaPlayer(this, mAudioManager.generateAudioSessionId());
 		mp.setAudioStreamType(AudioManager.STREAM_MUSIC);
 		mp.setOnCompletionListener(this);
 		mp.setOnErrorListener(this);
@@ -2339,6 +2339,22 @@ public final class PlaybackService extends Service
 	 */
 	public int getQueuePositionForSongId(long id) {
 		return mTimeline.getQueuePositionForSongId(id);
+	}
+
+	public int getSampleRate() {
+		return mMediaPlayer.getSampleRate();
+	}
+
+	public int getPlaybackRate() {
+		return mMediaPlayer.getPlaybackRate();
+	}
+
+	public String getBitsPerSample() {
+		return mMediaPlayer.getBitsPerSample();
+	}
+
+	public String getPlaybackBitsPerSample() {
+		return mMediaPlayer.getPlaybackBitsPerSample();
 	}
 
 	/**
