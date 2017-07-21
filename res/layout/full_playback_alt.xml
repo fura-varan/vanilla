@@ -55,17 +55,23 @@ THE SOFTWARE.
 		</TableRow>
 		<TableRow>
 			<TextView
-				android:text="@string/_artist"
-				android:textColor="?overlay_foreground_color"
 				android:paddingRight="5dip"
 				android:gravity="right" />
-			<TextView android:id="@+id/artist" android:textColor="?overlay_foreground_color"/>
+			<TextView android:id="@+id/quality" />
 		</TableRow>
 		<TableRow>
 			<TextView
 				android:paddingRight="5dip"
 				android:gravity="right" />
-			<TextView android:id="@+id/quality" />
+			<TextView android:id="@+id/buffer" />
+		</TableRow>
+		<TableRow>
+			<TextView
+				android:text="@string/_artist"
+				android:textColor="?overlay_foreground_color"
+				android:paddingRight="5dip"
+				android:gravity="right" />
+			<TextView android:id="@+id/artist" android:textColor="?overlay_foreground_color"/>
 		</TableRow>
 		<TableRow>
 			<TextView

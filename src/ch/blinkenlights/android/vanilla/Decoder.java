@@ -45,6 +45,7 @@ public class Decoder implements PCMProcessor {
 	private String mSource;
 	private int mSessionId = 0;
 	private long mTotalSamples = 0;
+	private long mBufferedSamples = 0;
 
 	@Override
 	public String toString() {
@@ -90,13 +91,13 @@ public class Decoder implements PCMProcessor {
 		}
 	}
 
-
+	// Track playback position in ms
 	public int getCurrentPosition() {
 		int result = 0;
 		if (mAudioTrack != null) {
-			final int frameRate = getSampleRate();
+			final int frameRate = getPlaybackRate();
 			final int headPosition = mAudioTrack.getPlaybackHeadPosition();
-			result = (headPosition * 1000) / frameRate;
+			result = samplesToMs(headPosition, frameRate);
 		}
 
 		return result;
@@ -106,9 +107,9 @@ public class Decoder implements PCMProcessor {
 	public int getDuration() {
 		int result = 0;
 
-		final int sampleRate = getSampleRate();
+		final int sampleRate = getPlaybackRate();
 		if (sampleRate != 0) {
-			result = ((int) mTotalSamples  / sampleRate) * 1000;
+			result = samplesToMs(mTotalSamples, sampleRate);
 		}
 
 		return result;
@@ -130,6 +131,27 @@ public class Decoder implements PCMProcessor {
 		}
 
 		return result;
+	}
+
+	public String getBufferInfo() {
+		String result = "";
+		if (mAudioTrack != null) {
+			int sampleRate = getPlaybackRate();
+			int bufferedMs = samplesToMs(mBufferedSamples,sampleRate);
+			int position = getCurrentPosition();
+			result = "Buffered ahead: " + (bufferedMs - position) + "ms"
+					+ ", underruns: " + mAudioTrack.getUnderrunCount();
+		}
+
+		return result;
+	}
+
+	private int samplesToMs(int samples, int sampleRate) {
+		return samplesToMs(Long.valueOf(samples),  sampleRate);
+	}
+
+	private int samplesToMs(long samples, int sampleRate) {
+		return (int) ((1000 * samples) / sampleRate);
 	}
 
 	public String getBitsPerSample() {
@@ -195,6 +217,7 @@ public class Decoder implements PCMProcessor {
 			InputStream is = new FileInputStream(mSource);
 			FLACDecoder decoder = new FLACDecoder(is);
 			decoder.addPCMProcessor(this);
+			mBufferedSamples = 0;
 			decoding = true;
 			decoder.decode();
 			is.close();
@@ -266,6 +289,7 @@ public class Decoder implements PCMProcessor {
 			}
 
 			mAudioTrack.write(data, processed, size, AudioTrack.WRITE_BLOCKING);
+			mBufferedSamples += size;
 			processed += size;
 		}
 	}
@@ -297,7 +321,7 @@ public class Decoder implements PCMProcessor {
 			}
 
 			mAudioTrack.write(floats, 0, size, AudioTrack.WRITE_BLOCKING);
-
+			mBufferedSamples += size;
 			processed += 3*size;
 		}
 	}

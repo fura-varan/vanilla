@@ -211,6 +211,10 @@ public class VanillaMediaPlayer {
 		return mDecoder.getBitsPerSample();
 	}
 
+	public String getBufferInfo() {
+		return mDecoder.getBufferInfo();
+	}
+
 	public String getPlaybackBitsPerSample() {
 		return mDecoder.getPlaybackBitsPerSample();
 	}

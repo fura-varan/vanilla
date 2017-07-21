@@ -52,6 +52,9 @@ public class SlidingPlaybackActivity extends PlaybackActivity
 	 * TextView indicating the total duration of the song
 	 */
 	private TextView mDurationView;
+
+	private TextView mBuffer;
+
 	/**
 	 * Current song duration in milliseconds.
 	 */
@@ -81,6 +84,7 @@ public class SlidingPlaybackActivity extends PlaybackActivity
 		mSlidingView.setCallback(this);
 		mElapsedView = (TextView)findViewById(R.id.elapsed);
 		mDurationView = (TextView)findViewById(R.id.duration);
+		mBuffer = (TextView) findViewById(R.id.buffer);
 		mSeekBar = (SeekBar)findViewById(R.id.seek_bar);
 		mSeekBar.setMax(1000);
 		mSeekBar.setOnSeekBarChangeListener(this);
@@ -277,6 +281,11 @@ public class SlidingPlaybackActivity extends PlaybackActivity
 		}
 
 		mElapsedView.setText(DateUtils.formatElapsedTime(mTimeBuilder, position / 1000));
+
+		if (mBuffer != null && PlaybackService.hasInstance()) {
+			String buffInfo = PlaybackService.get(this).getBufferInfo();
+			mBuffer.setText(buffInfo);
+		}
 
 		if (!mPaused && (mState & PlaybackService.FLAG_PLAYING) != 0) {
 			// Try to update right after the duration increases by one second

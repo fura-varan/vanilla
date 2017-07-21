@@ -2357,6 +2357,10 @@ public final class PlaybackService extends Service
 		return mMediaPlayer.getPlaybackBitsPerSample();
 	}
 
+	public String getBufferInfo() {
+		return mMediaPlayer.getBufferInfo();
+	}
+
 	/**
 	 * Do a 'hard' jump to given queue position
 	*/
