@@ -219,6 +219,7 @@ public class Decoder implements PCMProcessor {
 			decoder.addPCMProcessor(this);
 			mBufferedSamples = 0;
 			decoding = true;
+			starting = true;
 			decoder.decode();
 			is.close();
 		} catch (IOException ex) {
@@ -258,13 +259,25 @@ public class Decoder implements PCMProcessor {
 		int buffSize = AudioTrack.getMinBufferSize(sampleRate, chanelMask, encoding);
 		mAudioTrack = new AudioTrack(attributes, formatBuilder.build(),
 				9 * buffSize, AudioTrack.MODE_STREAM, mSessionId);
-		if (decoding) {
-			mAudioTrack.play();
-		}
+		mAudioTrack.setNotificationMarkerPosition((int) mTotalSamples);
+		mAudioTrack.setPlaybackPositionUpdateListener(new AudioTrack.OnPlaybackPositionUpdateListener() {
+			@Override
+			public void onMarkerReached(AudioTrack track) {
+				if (mOnCompletionListener != null) {
+					mOnCompletionListener.onCompletion(null);
+				}
+			}
+
+			@Override
+			public void onPeriodicNotification(AudioTrack track) {
+				// do nothing
+			}
+		});
 	}
 
 	private static final long MAX_24BIT = 8388607;
 	private boolean decoding;
+	private boolean starting = false;
 
 	@Override
 	public void processPCM(ByteData pcm) {
@@ -291,6 +304,11 @@ public class Decoder implements PCMProcessor {
 			mAudioTrack.write(data, processed, size, AudioTrack.WRITE_BLOCKING);
 			mBufferedSamples += size;
 			processed += size;
+
+			if (starting) {
+				mAudioTrack.play();
+				starting = false;
+			}
 		}
 	}
 
@@ -323,6 +341,11 @@ public class Decoder implements PCMProcessor {
 			mAudioTrack.write(floats, 0, size, AudioTrack.WRITE_BLOCKING);
 			mBufferedSamples += size;
 			processed += 3*size;
+
+			if (starting) {
+				mAudioTrack.play();
+				starting = false;
+			}
 		}
 	}
 }
