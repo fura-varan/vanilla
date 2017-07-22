@@ -11,7 +11,6 @@ import android.media.MediaPlayer;
 
 import org.jflac.FLACDecoder;
 import org.jflac.PCMProcessor;
-import org.jflac.frame.Frame;
 import org.jflac.metadata.StreamInfo;
 import org.jflac.util.ByteData;
 
@@ -47,11 +46,6 @@ public class Decoder implements PCMProcessor {
 	private long mTotalSamples = 0;
 	private long mBufferedSamples = 0;
 
-	@Override
-	public String toString() {
-		return super.toString();
-	}
-
 	private MediaPlayer.OnErrorListener mOnErrorListener;
 	private MediaPlayer.OnCompletionListener mOnCompletionListener;
 
@@ -63,11 +57,16 @@ public class Decoder implements PCMProcessor {
 		decoding = false;
 		if (mAudioTrack != null) {
 			mAudioTrack.stop();
+			mAudioTrack.flush();
+			mAudioTrack.release();
+			mAudioTrack = null;
 		}
 	}
 
 	public void pause() {
-		mAudioTrack.pause();
+		if (mAudioTrack != null) {
+			mAudioTrack.pause();
+		}
 	}
 
 	public boolean isPlaying() {
@@ -94,10 +93,11 @@ public class Decoder implements PCMProcessor {
 	// Track playback position in ms
 	public int getCurrentPosition() {
 		int result = 0;
-		if (mAudioTrack != null) {
-			final int frameRate = getPlaybackRate();
+
+		final int sampleRate = getPlaybackRate();
+		if (mAudioTrack != null && sampleRate > 0) {
 			final int headPosition = mAudioTrack.getPlaybackHeadPosition();
-			result = samplesToMs(headPosition, frameRate);
+			result = samplesToMs(headPosition, sampleRate);
 		}
 
 		return result;
@@ -108,7 +108,7 @@ public class Decoder implements PCMProcessor {
 		int result = 0;
 
 		final int sampleRate = getPlaybackRate();
-		if (sampleRate != 0) {
+		if (sampleRate > 0) {
 			result = samplesToMs(mTotalSamples, sampleRate);
 		}
 
@@ -135,9 +135,10 @@ public class Decoder implements PCMProcessor {
 
 	public String getBufferInfo() {
 		String result = "";
-		if (mAudioTrack != null) {
-			int sampleRate = getPlaybackRate();
-			int bufferedMs = samplesToMs(mBufferedSamples,sampleRate);
+
+		final int sampleRate = getPlaybackRate();
+		if (mAudioTrack != null && sampleRate > 0) {
+			int bufferedMs = samplesToMs(mBufferedSamples, sampleRate);
 			int position = getCurrentPosition();
 			result = "Buffered ahead: " + (bufferedMs - position) + "ms"
 					+ ", underruns: " + mAudioTrack.getUnderrunCount();
@@ -213,20 +214,28 @@ public class Decoder implements PCMProcessor {
 	}
 
 	public void play() {
-		try {
-			InputStream is = new FileInputStream(mSource);
-			FLACDecoder decoder = new FLACDecoder(is);
-			decoder.addPCMProcessor(this);
-			mBufferedSamples = 0;
-			decoding = true;
-			starting = true;
-			decoder.decode();
-			is.close();
-		} catch (IOException ex) {
-			if (mOnErrorListener != null) {
-				mOnErrorListener.onError(null, MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO);
+		mBufferedSamples = 0;
+		decoding = true;
+		starting = true;
+		Thread decoderThread = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					InputStream is = new FileInputStream(mSource);
+					FLACDecoder decoder = new FLACDecoder(is);
+					decoder.addPCMProcessor(Decoder.this);
+					decoder.decode();
+					is.close();
+				} catch (IOException ex) {
+					if (mOnErrorListener != null) {
+						mOnErrorListener.onError(null, MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO);
+					}
+				}
 			}
-		}
+		});
+
+		decoderThread.start();
+
 	}
 
 	@Override
@@ -264,6 +273,7 @@ public class Decoder implements PCMProcessor {
 			@Override
 			public void onMarkerReached(AudioTrack track) {
 				if (mOnCompletionListener != null) {
+					stop();
 					mOnCompletionListener.onCompletion(null);
 				}
 			}
