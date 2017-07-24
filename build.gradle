@@ -27,7 +27,7 @@ android {
 
     defaultConfig {
         applicationId "ch.blinkenlights.android.vanilla"
-        minSdkVersion 24
+        minSdkVersion 23
         targetSdkVersion 25
     }
 

@@ -140,8 +140,7 @@ public class Decoder implements PCMProcessor {
 		if (mAudioTrack != null && sampleRate > 0) {
 			int bufferedMs = samplesToMs(mBufferedSamples, sampleRate);
 			int position = getCurrentPosition();
-			result = "Buffered ahead: " + (bufferedMs - position) + "ms"
-					+ ", underruns: " + mAudioTrack.getUnderrunCount();
+			result = "Buffered ahead: " + (bufferedMs - position) + "ms";
 		}
 
 		return result;
@@ -225,6 +224,8 @@ public class Decoder implements PCMProcessor {
 					FLACDecoder decoder = new FLACDecoder(is);
 					decoder.addPCMProcessor(Decoder.this);
 					decoder.decode();
+					decoding = false;
+					decoder.removePCMProcessor(Decoder.this);
 					is.close();
 				} catch (IOException ex) {
 					if (mOnErrorListener != null) {
@@ -263,6 +264,7 @@ public class Decoder implements PCMProcessor {
 		}
 
 		formatBuilder.setEncoding(encoding);
+		formatBuilder.setChannelMask(chanelMask);
 
 		AudioAttributes attributes = new AudioAttributes.Builder().build();
 		int buffSize = AudioTrack.getMinBufferSize(sampleRate, chanelMask, encoding);
