@@ -287,7 +287,9 @@ public class Decoder implements PCMProcessor {
 		});
 	}
 
-	private static final long MAX_24BIT = 8388607;
+	private static final int MAX_BIT24 = 16777216;
+	private static final float STEP_BIT24 = 2f / MAX_BIT24;
+
 	private boolean decoding;
 	private boolean starting = false;
 
@@ -338,16 +340,16 @@ public class Decoder implements PCMProcessor {
 			}
 
 			int offset;
-			int byte0;
-			int byte1;
-			float int24bit;
+			int i0;
+			int i1;
+			int i2;
 			float[] floats = new float[size];
 			for (int i = 0; i < size; ++i) {
 				offset = processed + i * 3;
-				byte0 = data[offset];
-				byte1 = data[offset + 1];
-				int24bit = data[offset + 2] * 65536 + byte1 * 256 + byte0;
-				floats[i] = int24bit / MAX_24BIT;
+				i0 = data[offset] & 0xFF;
+				i1 = 255 * (data[offset + 1] & 0xFF);
+				i2 = 65536 * data[offset + 2];
+				floats[i] = STEP_BIT24 * (i2 + i1 + i0);
 			}
 
 			mAudioTrack.write(floats, 0, size, AudioTrack.WRITE_BLOCKING);
