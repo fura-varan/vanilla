@@ -55,11 +55,10 @@ public class Decoder implements PCMProcessor {
 
 	public void stop() {
 		decoding = false;
+		mBufferedSamples = 0;
 		if (mAudioTrack != null) {
 			mAudioTrack.stop();
 			mAudioTrack.flush();
-			mAudioTrack.release();
-			mAudioTrack = null;
 		}
 	}
 
@@ -140,7 +139,7 @@ public class Decoder implements PCMProcessor {
 		if (mAudioTrack != null && sampleRate > 0) {
 			int bufferedMs = samplesToMs(mBufferedSamples, sampleRate);
 			int position = getCurrentPosition();
-			result = "Buffered ahead: " + (bufferedMs - position) + "ms";
+			result = "Buffered ahead: " + (float) (bufferedMs - position) / 1000 + "s";
 		}
 
 		return result;
@@ -208,7 +207,7 @@ public class Decoder implements PCMProcessor {
 		decoding = false;
 		InputStream is = new FileInputStream(mSource);
 		FLACDecoder decoder = new FLACDecoder(is);
-		processStreamInfo(decoder.readStreamInfo());
+		setupAudioTrack(decoder.readStreamInfo());
 		is.close();
 	}
 
@@ -236,11 +235,15 @@ public class Decoder implements PCMProcessor {
 		});
 
 		decoderThread.start();
-
 	}
 
-	@Override
-	public void processStreamInfo(StreamInfo streamInfo) {
+	private void setupAudioTrack(StreamInfo streamInfo) {
+		if (mAudioTrack != null) {
+			mAudioTrack.stop();
+			mAudioTrack.flush();
+			mAudioTrack.release();
+		}
+
 		mTotalSamples = streamInfo.getTotalSamples();
 		AudioFormat.Builder formatBuilder = new AudioFormat.Builder();
 		int sampleRate = streamInfo.getSampleRate();
@@ -285,6 +288,11 @@ public class Decoder implements PCMProcessor {
 				// do nothing
 			}
 		});
+	}
+
+	@Override
+	public void processStreamInfo(StreamInfo streamInfo) {
+		// do nothing
 	}
 
 	private static final int MAX_BIT24 = 16777216;
