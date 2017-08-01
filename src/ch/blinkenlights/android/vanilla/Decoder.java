@@ -10,14 +10,14 @@ import android.media.AudioTrack;
 import android.media.MediaPlayer;
 
 import org.jflac.FLACDecoder;
-import org.jflac.PCMProcessor;
+import org.jflac.frame.Frame;
 import org.jflac.metadata.StreamInfo;
 import org.jflac.util.ByteData;
 
 import static android.media.MediaPlayer.MEDIA_ERROR_IO;
 import static android.media.MediaPlayer.MEDIA_ERROR_UNKNOWN;
 
-public class Decoder implements PCMProcessor {
+public class Decoder {
 
 	private enum BitsPerSample {
 		UNKONOWN, BIT8, BIT16, BIT24, BIT32;
@@ -45,6 +45,7 @@ public class Decoder implements PCMProcessor {
 	private int mSessionId = 0;
 	private long mTotalSamples = 0;
 	private long mBufferedSamples = 0;
+	private int mPlaybackHeadPosition = 0;
 
 	private MediaPlayer.OnErrorListener mOnErrorListener;
 	private MediaPlayer.OnCompletionListener mOnCompletionListener;
@@ -212,21 +213,99 @@ public class Decoder implements PCMProcessor {
 	}
 
 	public void play() {
-		mBufferedSamples = 0;
-		decoding = true;
-		starting = true;
-		Thread decoderThread = new Thread(new Runnable() {
+		if (feedThread == null) {
+			startFeedAudioTrack();
+		}
+		mAudioTrack.play();
+	}
+
+	private void startFeedAudioTrack() {
+		feedAudioTrack = true;
+
+		feedThread = new Thread(new Runnable() {
 			@Override
 			public void run() {
+				// wait for initial fill
+				while (fillBuffer) {
+					try {
+						wait();
+					} catch (InterruptedException e) {
+						// check fillBuffer
+					}
+				}
+
+				while (decoding) {
+					while (!feedAudioTrack) {
+						try {
+							wait();
+						} catch (InterruptedException e) {
+							// check feedAudioTrack
+						}
+					}
+					while (feedAudioTrack && decoding) {
+						if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
+							feedBytes();
+							feedAudioTrack = false;
+						} else if (mBitsPerSample == BitsPerSample.BIT24) {
+							// TODO: feed24bits(pcm);
+						}
+					}
+				}
+			}
+		});
+
+		feedThread.start();
+	}
+
+	private void startDecoding() {
+		mBufferedSamples = 0;
+		decoding = true;
+		fillBuffer = true;
+
+		decoderThread = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				InputStream is = null;
 				try {
-					InputStream is = new FileInputStream(mSource);
+					is = new FileInputStream(mSource);
 					FLACDecoder decoder = new FLACDecoder(is);
-					decoder.addPCMProcessor(Decoder.this);
-					decoder.decode();
+					decoder.seek(mPlaybackHeadPosition);
+					Frame frame = decoder.readNextFrame();
+					ByteData pcm = decoder.decodeFrame(frame, null);
+					decoding = !decoder.isEOF() && frame != null;
+					while (decoding) {
+						while (!fillBuffer) {
+							try {
+								wait();
+							} catch (InterruptedException e) {
+								// check fillBuffer
+							}
+						}
+						while (fillBuffer && decoding) {
+							pcm = decoder.decodeFrame(frame, pcm);
+							if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
+								int len = pcm.getLen();
+								bytesBuffer.write(pcm.getData(), len);
+								mBufferedSamples += len;
+								if (bytesBuffer.getFreeBytes() < len) {
+									bytesBuffer.switchBuffers();
+									fillBuffer = false;
+								}
+							} else if (mBitsPerSample == BitsPerSample.BIT24) {
+								//TODO
+							}
+
+							decoding = !decoder.isEOF() && frame != null;
+						}
+					}
 					decoding = false;
-					decoder.removePCMProcessor(Decoder.this);
 					is.close();
 				} catch (IOException ex) {
+					try {
+						is.close();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
 					if (mOnErrorListener != null) {
 						mOnErrorListener.onError(null, MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO);
 					}
@@ -290,29 +369,19 @@ public class Decoder implements PCMProcessor {
 		});
 	}
 
-	@Override
-	public void processStreamInfo(StreamInfo streamInfo) {
-		// do nothing
-	}
-
 	private static final int MAX_BIT24 = 16777216;
 	private static final float STEP_BIT24 = 2f / MAX_BIT24;
 
 	private boolean decoding;
-	private boolean starting = false;
+	private boolean feedAudioTrack;
+	private boolean fillBuffer;
 
-	@Override
-	public void processPCM(ByteData pcm) {
-		if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
-			processBytes(pcm);
-		} else if (mBitsPerSample == BitsPerSample.BIT24) {
-			process24bits(pcm);
-		}
-	}
+	private DoubleBuffer bytesBuffer = new DoubleBuffer();
+	private Thread decoderThread = null;
+	private Thread feedThread = null;
 
-	private void processBytes(ByteData pcm) {
-		final byte[] data = pcm.getData();
-		final int dataSize = pcm.getLen();
+	private void feedBytes() {
+		final int dataSize = bytesBuffer.size;
 		final int buffSize = mAudioTrack.getBufferSizeInFrames();
 		int processed = 0;
 		while (decoding && processed < dataSize) {
@@ -323,18 +392,13 @@ public class Decoder implements PCMProcessor {
 				size = dataSize - processed;
 			}
 
-			mAudioTrack.write(data, processed, size, AudioTrack.WRITE_BLOCKING);
+			mAudioTrack.write(bytesBuffer.bytes, processed, size, AudioTrack.WRITE_BLOCKING);
 			mBufferedSamples += size;
 			processed += size;
-
-			if (starting) {
-				mAudioTrack.play();
-				starting = false;
-			}
 		}
 	}
 
-	private void process24bits(ByteData pcm) {
+	private void feed24bits(ByteData pcm) {
 		final byte[] data = pcm.getData();
 		final int dataSize = pcm.getLen();
 		final int buffSize = mAudioTrack.getBufferSizeInFrames();
@@ -363,11 +427,6 @@ public class Decoder implements PCMProcessor {
 			mAudioTrack.write(floats, 0, size, AudioTrack.WRITE_BLOCKING);
 			mBufferedSamples += size;
 			processed += 3*size;
-
-			if (starting) {
-				mAudioTrack.play();
-				starting = false;
-			}
 		}
 	}
 }
