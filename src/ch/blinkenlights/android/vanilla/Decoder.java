@@ -1,6 +1,5 @@
 package ch.blinkenlights.android.vanilla;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -11,6 +10,7 @@ import android.media.MediaPlayer;
 
 import org.jflac.FLACDecoder;
 import org.jflac.frame.Frame;
+import org.jflac.io.RandomFileInputStream;
 import org.jflac.metadata.StreamInfo;
 import org.jflac.util.ByteData;
 
@@ -74,18 +74,22 @@ public class Decoder {
     private void stopDecoding() {
         decoding = false;
         mBufferedSamples = 0;
-        decoderThread.interrupt();
+        if (decoderThread != null) {
+            decoderThread.interrupt();
 
-        try {
-            decoderThread.join();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+            try {
+                decoderThread.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         }
 
-        try {
-            feedThread.join();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        if (feedThread != null) {
+            try {
+                feedThread.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -114,7 +118,7 @@ public class Decoder {
     public int getCurrentPosition() {
         int result = 0;
 
-        final int sampleRate = getPlaybackRate();
+        final int sampleRate = getSampleRate();
         if (mAudioTrack != null && sampleRate > 0) {
             final int headPosition = mAudioTrack.getPlaybackHeadPosition();
             result = samplesToMs(headPosition, sampleRate);
@@ -127,7 +131,7 @@ public class Decoder {
     public int getDuration() {
         int result = 0;
 
-        final int sampleRate = getPlaybackRate();
+        final int sampleRate = getSampleRate();
         if (sampleRate > 0) {
             result = samplesToMs(mTotalSamples, sampleRate);
         }
@@ -146,7 +150,7 @@ public class Decoder {
 
     public int getPlaybackRate() {
         int result = 0;
-        if (mAudioTrack != null) {
+        if (isPlaying()) {
             result = mAudioTrack.getPlaybackRate();
         }
 
@@ -160,8 +164,8 @@ public class Decoder {
 
     private int bufferedAheadMs() {
         int result = 0;
-        if (mAudioTrack != null) {
-            final int sampleRate = getPlaybackRate();
+        final int sampleRate = getSampleRate();
+        if (sampleRate > 0) {
             int bufferedMs = samplesToMs(mBufferedSamples, sampleRate);
             int position = getCurrentPosition();
             result = bufferedMs - position;
@@ -229,11 +233,8 @@ public class Decoder {
 
     public void setSource(String source) throws IOException {
         mSource = source;
-        decoding = false;
-        InputStream is = new FileInputStream(mSource);
-        FLACDecoder decoder = new FLACDecoder(is);
-        setupAudioTrack(decoder.readStreamInfo());
-        is.close();
+        stop();
+        startDecoding();
     }
 
     public void play() {
@@ -244,6 +245,8 @@ public class Decoder {
     }
 
     private void startFeedAudioTrack() {
+        underruns = 0;
+
         feedThread = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -266,11 +269,10 @@ public class Decoder {
                     }
 
                     if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
+                        bytesBuffer.switchBuffers();
                         fillBuffer = true;
                         decoderThread.interrupt();
                         feedBytes();
-                        bytesBuffer.switchBuffers();
-
                     } else if (mBitsPerSample == BitsPerSample.BIT24) {
                         // TODO: feed24bits(pcm);
                     }
@@ -291,8 +293,9 @@ public class Decoder {
             public void run() {
                 InputStream is = null;
                 try {
-                    is = new FileInputStream(mSource);
+                    is = new RandomFileInputStream(mSource);
                     FLACDecoder decoder = new FLACDecoder(is);
+                    setupAudioTrack(decoder.readStreamInfo());
                     decoder.seek(mPlaybackHeadPosition);
                     Frame frame = decoder.readNextFrame();
                     ByteData pcm = decoder.decodeFrame(frame, null);
@@ -300,7 +303,9 @@ public class Decoder {
                     while (decoding) {
                         while (!fillBuffer && decoding) {
                             try {
-                                wait();
+                                synchronized (decoderThread) {
+                                    decoderThread.wait();
+                                }
                             } catch (InterruptedException e) {
                                 // check while condition again
                             }
@@ -311,8 +316,8 @@ public class Decoder {
                                 int len = pcm.getLen();
                                 bytesBuffer.write(pcm.getData(), len);
                                 mBufferedSamples += len;
-                                if (bytesBuffer.getFreeBytes() < len) {
-                                    bytesBuffer.switchBuffers();
+                                int freeBytes = bytesBuffer.getFreeBytes();
+                                if (freeBytes < len) {
                                     fillBuffer = false;
                                 }
                             } else if (mBitsPerSample == BitsPerSample.BIT24) {

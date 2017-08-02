@@ -17,22 +17,19 @@ public class DoubleBuffer {
     private byte[] writeBytes = bufferB;
     private int writeBytesSize = 0;
 
-    private boolean empty = true;
     private boolean bytesIsBufferA = true;
 
     public void switchBuffers() {
-        if (!empty) {
-            size = writeBytesSize;
-            writeBytesSize = 0;
-            if (bytesIsBufferA) {
-                bytes = bufferB;
-                writeBytes = bufferA;
-                bytesIsBufferA = false;
-            } else {
-                bytes = bufferA;
-                writeBytes = bufferB;
-                bytesIsBufferA = true;
-            }
+        size = writeBytesSize;
+        writeBytesSize = 0;
+        if (bytesIsBufferA) {
+            bytes = bufferB;
+            writeBytes = bufferA;
+            bytesIsBufferA = false;
+        } else {
+            bytes = bufferA;
+            writeBytes = bufferB;
+            bytesIsBufferA = true;
         }
     }
 
