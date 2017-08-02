@@ -1,5 +1,6 @@
 package ch.blinkenlights.android.vanilla;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -66,6 +67,7 @@ public class Decoder {
     public void pause() {
         if (mAudioTrack != null) {
             mAudioTrack.pause();
+            mPlaybackHeadPosition = mAudioTrack.getPlaybackHeadPosition();
         }
 
         stopDecoding();
@@ -233,6 +235,12 @@ public class Decoder {
 
     public void setSource(String source) throws IOException {
         mSource = source;
+
+        InputStream is = new FileInputStream(mSource);
+        FLACDecoder decoder = new FLACDecoder(is);
+        setupAudioTrack(decoder.readStreamInfo());
+        is.close();
+
         stop();
         startDecoding();
     }
@@ -295,7 +303,6 @@ public class Decoder {
                 try {
                     is = new RandomFileInputStream(mSource);
                     FLACDecoder decoder = new FLACDecoder(is);
-                    setupAudioTrack(decoder.readStreamInfo());
                     decoder.seek(mPlaybackHeadPosition);
                     Frame frame = decoder.readNextFrame();
                     ByteData pcm = decoder.decodeFrame(frame, null);
