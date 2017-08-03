@@ -47,4 +47,9 @@ public class DoubleBuffer {
     public int getFreeBytes() {
         return MAX_SIZE - writeBytesSize;
     }
+
+    public void clean() {
+        size = 0;
+        writeBytesSize = 0;
+    }
 }

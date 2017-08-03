@@ -75,24 +75,30 @@ public class Decoder {
 
     private void stopDecoding() {
         decoding = false;
-        mBufferedSamples = 0;
+
+        if (feedThread != null) {
+            try {
+                feedThread.join();
+                feedThread = null;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
         if (decoderThread != null) {
             decoderThread.interrupt();
 
             try {
                 decoderThread.join();
+                decoderThread = null;
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
 
-        if (feedThread != null) {
-            try {
-                feedThread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
+        mBufferedSamples = 0;
+        underruns = 0;
+        bytesBuffer.clean();
     }
 
     public boolean isPlaying() {
@@ -246,10 +252,10 @@ public class Decoder {
     }
 
     public void play() {
+        startPlay = true;
         if (feedThread == null) {
             startFeedAudioTrack();
         }
-        mAudioTrack.play();
     }
 
     private void startFeedAudioTrack() {
@@ -306,6 +312,7 @@ public class Decoder {
                     decoder.seek(mPlaybackHeadPosition);
                     Frame frame = decoder.readNextFrame();
                     ByteData pcm = decoder.decodeFrame(frame, null);
+                    writePCM(pcm);
                     decoding = !decoder.isEOF() && frame != null;
                     while (decoding) {
                         while (!fillBuffer && decoding) {
@@ -318,19 +325,9 @@ public class Decoder {
                             }
                         }
                         while (fillBuffer && decoding) {
+                            frame = decoder.readNextFrame();
                             pcm = decoder.decodeFrame(frame, pcm);
-                            if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
-                                int len = pcm.getLen();
-                                bytesBuffer.write(pcm.getData(), len);
-                                mBufferedSamples += len;
-                                int freeBytes = bytesBuffer.getFreeBytes();
-                                if (freeBytes < len) {
-                                    fillBuffer = false;
-                                }
-                            } else if (mBitsPerSample == BitsPerSample.BIT24) {
-                                //TODO
-                            }
-
+                            writePCM(pcm);
                             decoding = !decoder.isEOF() && frame != null;
                         }
                     }
@@ -345,6 +342,20 @@ public class Decoder {
                     if (mOnErrorListener != null) {
                         mOnErrorListener.onError(null, MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO);
                     }
+                }
+            }
+
+            private void writePCM(ByteData pcm) {
+                if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
+                    int len = pcm.getLen();
+                    bytesBuffer.write(pcm.getData(), len);
+                    mBufferedSamples += len;
+                    int freeBytes = bytesBuffer.getFreeBytes();
+                    if (freeBytes < len) {
+                        fillBuffer = false;
+                    }
+                } else if (mBitsPerSample == BitsPerSample.BIT24) {
+                    //TODO
                 }
             }
         });
@@ -410,6 +421,7 @@ public class Decoder {
 
     private boolean decoding;
     private boolean fillBuffer;
+    private boolean startPlay;
 
     private DoubleBuffer bytesBuffer = new DoubleBuffer();
     private Thread decoderThread = null;
@@ -431,6 +443,11 @@ public class Decoder {
             mAudioTrack.write(bytesBuffer.bytes, processed, size, AudioTrack.WRITE_BLOCKING);
             mBufferedSamples += size;
             processed += size;
+
+            if (startPlay) {
+                mAudioTrack.play();
+                startPlay = false;
+            }
         }
     }
 
