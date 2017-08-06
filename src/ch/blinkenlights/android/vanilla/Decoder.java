@@ -8,6 +8,7 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.media.MediaPlayer;
+import android.util.Log;
 
 import org.jflac.FLACDecoder;
 import org.jflac.frame.Frame;
@@ -39,6 +40,19 @@ public class Decoder {
         }
     }
 
+    private static final String TAG = "Decoder";
+    private static final int MAX_BIT24 = 16777216;
+    private static final float STEP_BIT24 = 2f / MAX_BIT24;
+
+    private boolean decoding;
+    private boolean fillBuffer;
+    private boolean startPlay;
+
+    private DoubleBuffer bytesBuffer = new DoubleBuffer();
+    private Thread decoderThread = null;
+    private Thread feedThread = null;
+    private int underruns = 0;
+
     private AudioTrack mAudioTrack;
     private BitsPerSample mBitsPerSample;
 
@@ -47,6 +61,7 @@ public class Decoder {
     private long mTotalSamples = 0;
     private long mBufferedSamples = 0;
     private int mPlaybackHeadPosition = 0;
+    private int mSamplesOffset = 0;
 
     private MediaPlayer.OnErrorListener mOnErrorListener;
     private MediaPlayer.OnCompletionListener mOnCompletionListener;
@@ -56,27 +71,41 @@ public class Decoder {
     }
 
     public void stop() {
+        Log.d(TAG, "stop()");
+
+        stopAudioTrack();
+        if (mAudioTrack != null) {
+            stopFeed();
+            startDecoding();
+        }
+    }
+
+    private void stopAudioTrack() {
         if (mAudioTrack != null) {
             mAudioTrack.stop();
             mAudioTrack.flush();
+            mPlaybackHeadPosition = 0;
         }
-
-        stopDecoding();
     }
 
     public void pause() {
+        Log.d(TAG, "pause()");
         if (mAudioTrack != null) {
             mAudioTrack.pause();
             mPlaybackHeadPosition = mAudioTrack.getPlaybackHeadPosition();
+            mSamplesOffset = mPlaybackHeadPosition;
         }
 
-        stopDecoding();
+        stopFeed();
+        startDecoding();
     }
 
-    private void stopDecoding() {
+    private void stopFeed() {
+        Log.d(TAG, "stopFeed()>");
         decoding = false;
 
         if (feedThread != null) {
+            feedThread.interrupt();
             try {
                 feedThread.join();
                 feedThread = null;
@@ -85,20 +114,9 @@ public class Decoder {
             }
         }
 
-        if (decoderThread != null) {
-            decoderThread.interrupt();
-
-            try {
-                decoderThread.join();
-                decoderThread = null;
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-
         mBufferedSamples = 0;
         underruns = 0;
-        bytesBuffer.clean();
+        Log.d(TAG, "stopFeed()<");
     }
 
     public boolean isPlaying() {
@@ -107,6 +125,7 @@ public class Decoder {
             result = true;
         }
 
+        Log.d(TAG, "isPlaying() = " + result);
         return result;
     }
 
@@ -117,6 +136,7 @@ public class Decoder {
     }
 
     public void seekTo(int position) {
+        Log.d(TAG, "seekTo(" + position +")");
         if (mAudioTrack != null) {
             mAudioTrack.setPlaybackHeadPosition(position);
         }
@@ -132,6 +152,7 @@ public class Decoder {
             result = samplesToMs(headPosition, sampleRate);
         }
 
+        //Log.d(TAG, "getCurrentPosition() = " + result);
         return result;
     }
 
@@ -144,6 +165,7 @@ public class Decoder {
             result = samplesToMs(mTotalSamples, sampleRate);
         }
 
+        //Log.d(TAG, "getCurrentPosition() = " + result);
         return result;
     }
 
@@ -158,7 +180,7 @@ public class Decoder {
 
     public int getPlaybackRate() {
         int result = 0;
-        if (isPlaying()) {
+        if (mAudioTrack != null) {
             result = mAudioTrack.getPlaybackRate();
         }
 
@@ -174,9 +196,10 @@ public class Decoder {
         int result = 0;
         final int sampleRate = getSampleRate();
         if (sampleRate > 0) {
+            int offsetMs = samplesToMs(mSamplesOffset, sampleRate);
             int bufferedMs = samplesToMs(mBufferedSamples, sampleRate);
             int position = getCurrentPosition();
-            result = bufferedMs - position;
+            result = offsetMs + bufferedMs - position;
         }
 
         return result;
@@ -240,6 +263,12 @@ public class Decoder {
     }
 
     public void setSource(String source) throws IOException {
+        Log.d(TAG, "setSource(" + source + ")");
+
+        stopAudioTrack();
+        stopFeed();
+        stopDecoding();
+
         mSource = source;
 
         InputStream is = new FileInputStream(mSource);
@@ -247,11 +276,11 @@ public class Decoder {
         setupAudioTrack(decoder.readStreamInfo());
         is.close();
 
-        stop();
         startDecoding();
     }
 
     public void play() {
+        Log.d(TAG, "play()");
         startPlay = true;
         if (feedThread == null) {
             startFeedAudioTrack();
@@ -259,14 +288,16 @@ public class Decoder {
     }
 
     private void startFeedAudioTrack() {
+        Log.d(TAG, "startFeedAudioTrack()");
         underruns = 0;
 
         feedThread = new Thread(new Runnable() {
             @Override
             public void run() {
+                Log.d(TAG, "feedThread.run()>");
                 while (decoding) {
                     // wait for fill
-                    while (fillBuffer) {
+                    while (decoding && fillBuffer) {
                         int safeWaitTime = bufferedAheadMs() / 2;
                         int sleepMs;
                         if (safeWaitTime > 200) {
@@ -276,28 +307,51 @@ public class Decoder {
                             underruns++;
                         }
                         try {
+                            Log.d(TAG, "feedThread.sleep(" + sleepMs + ")");
                             Thread.sleep(sleepMs);
                         } catch (InterruptedException e) {
-                            // check fillBuffer
+                            // re-check while condition
                         }
                     }
 
-                    if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
-                        bytesBuffer.switchBuffers();
-                        fillBuffer = true;
-                        decoderThread.interrupt();
-                        feedBytes();
-                    } else if (mBitsPerSample == BitsPerSample.BIT24) {
-                        // TODO: feed24bits(pcm);
+                    if (decoding) {
+                        if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
+                            Log.d(TAG, "feedThread switchBuffers()");
+                            bytesBuffer.switchBuffers();
+                            fillBuffer = true;
+                            decoderThread.interrupt();
+                            feedBytes();
+                        } else if (mBitsPerSample == BitsPerSample.BIT24) {
+                            // TODO: feed24bits(pcm);
+                        }
                     }
                 }
+                Log.d(TAG, "feedThread.run()<");
             }
         });
 
         feedThread.start();
     }
 
+    private void stopDecoding() {
+        if (decoderThread != null) {
+            decoding = false;
+            decoderThread.interrupt();
+
+            try {
+                decoderThread.join();
+                decoderThread = null;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     private void startDecoding() {
+        Log.d(TAG, "startDecoding()>");
+
+        stopDecoding();
+        bytesBuffer.clean();
         mBufferedSamples = 0;
         decoding = true;
         fillBuffer = true;
@@ -305,30 +359,34 @@ public class Decoder {
         decoderThread = new Thread(new Runnable() {
             @Override
             public void run() {
+                Log.d(TAG, "decoderThread.run()>");
                 InputStream is = null;
                 try {
                     is = new RandomFileInputStream(mSource);
                     FLACDecoder decoder = new FLACDecoder(is);
+                    Log.d(TAG, "decoder.seek(" + mPlaybackHeadPosition +")");
                     decoder.seek(mPlaybackHeadPosition);
                     Frame frame = decoder.readNextFrame();
                     ByteData pcm = decoder.decodeFrame(frame, null);
                     writePCM(pcm);
-                    decoding = !decoder.isEOF() && frame != null;
+                    decoding = decoding && !decoder.isEOF() && frame != null;
                     while (decoding) {
                         while (!fillBuffer && decoding) {
                             try {
                                 synchronized (decoderThread) {
+                                    Log.d(TAG, "decoderThread: Waiting to fillBuffer");
                                     decoderThread.wait();
                                 }
                             } catch (InterruptedException e) {
                                 // check while condition again
                             }
                         }
+                        Log.d(TAG, "decoderThread: Starting to fill buffer");
                         while (fillBuffer && decoding) {
                             frame = decoder.readNextFrame();
                             pcm = decoder.decodeFrame(frame, pcm);
                             writePCM(pcm);
-                            decoding = !decoder.isEOF() && frame != null;
+                            decoding = decoding && !decoder.isEOF() && frame != null;
                         }
                     }
                     decoding = false;
@@ -343,15 +401,18 @@ public class Decoder {
                         mOnErrorListener.onError(null, MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO);
                     }
                 }
+                Log.d(TAG, "decoderThread.run()<");
             }
 
             private void writePCM(ByteData pcm) {
+                //Log.d(TAG, "writePCM(pcm), pcm.getLen() =" + pcm.getLen());
                 if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
                     int len = pcm.getLen();
                     bytesBuffer.write(pcm.getData(), len);
                     mBufferedSamples += len;
                     int freeBytes = bytesBuffer.getFreeBytes();
                     if (freeBytes < len) {
+                        Log.d(TAG, "writePCM(pcm): bytesBuffer is full");
                         fillBuffer = false;
                     }
                 } else if (mBitsPerSample == BitsPerSample.BIT24) {
@@ -361,9 +422,11 @@ public class Decoder {
         });
 
         decoderThread.start();
+        Log.d(TAG, "startDecoding()<");
     }
 
     private void setupAudioTrack(StreamInfo streamInfo) {
+        Log.d(TAG, "setupAudioTrack()");
         if (mAudioTrack != null) {
             mAudioTrack.stop();
             mAudioTrack.flush();
@@ -416,19 +479,8 @@ public class Decoder {
         });
     }
 
-    private static final int MAX_BIT24 = 16777216;
-    private static final float STEP_BIT24 = 2f / MAX_BIT24;
-
-    private boolean decoding;
-    private boolean fillBuffer;
-    private boolean startPlay;
-
-    private DoubleBuffer bytesBuffer = new DoubleBuffer();
-    private Thread decoderThread = null;
-    private Thread feedThread = null;
-    private int underruns = 0;
-
     private void feedBytes() {
+        Log.d(TAG, "feedBytes() byteBuffer.size = " + bytesBuffer.size);
         final int dataSize = bytesBuffer.size;
         final int buffSize = mAudioTrack.getBufferSizeInFrames();
         int processed = 0;

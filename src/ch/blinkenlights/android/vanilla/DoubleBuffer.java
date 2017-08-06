@@ -5,8 +5,7 @@ package ch.blinkenlights.android.vanilla;
  */
 
 public class DoubleBuffer {
-    public static final int MEGA = 1024 * 1024;
-    public static final int MAX_SIZE = 4 * MEGA;
+    public static final int MAX_SIZE = 256 * 1024;
 
     private byte[] bufferA = new byte[MAX_SIZE];
     private byte[] bufferB = new byte[MAX_SIZE];
