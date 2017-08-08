@@ -37,3 +37,4 @@ proguard/
 *.iml
 out
 .settings/
+/.project

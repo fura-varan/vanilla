@@ -8,6 +8,7 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.media.MediaPlayer;
+import android.util.Log;
 
 import org.jflac.FLACDecoder;
 import org.jflac.PCMProcessor;
@@ -38,6 +39,13 @@ public class Decoder implements PCMProcessor {
 		}
 	}
 
+    private static final String TAG = "Decoder";
+    private static final int MAX_BIT24 = 16777216;
+    private static final float STEP_BIT24 = 2f / MAX_BIT24;
+
+    private boolean decoding = false;
+    private boolean starting = false;
+
 	private AudioTrack mAudioTrack;
 	private BitsPerSample mBitsPerSample;
 
@@ -54,6 +62,8 @@ public class Decoder implements PCMProcessor {
 	}
 
 	public void stop() {
+        Log.d(TAG, "stop()");
+
 		decoding = false;
 		mBufferedSamples = 0;
 		if (mAudioTrack != null) {
@@ -63,6 +73,8 @@ public class Decoder implements PCMProcessor {
 	}
 
 	public void pause() {
+        Log.d(TAG, "pause()");
+
 		if (mAudioTrack != null) {
 			mAudioTrack.pause();
 		}
@@ -84,6 +96,8 @@ public class Decoder implements PCMProcessor {
 	}
 
 	public void seekTo(int position) {
+        Log.d(TAG, "seekTo(" + position + ")");
+
 		if (mAudioTrack != null) {
 			mAudioTrack.setPlaybackHeadPosition(position);
 		}
@@ -203,6 +217,7 @@ public class Decoder implements PCMProcessor {
 	}
 
 	public void setSource(String source) throws IOException {
+        Log.d(TAG, "setSource(" + source + ")");
 		mSource = source;
 		decoding = false;
 		InputStream is = new FileInputStream(mSource);
@@ -218,6 +233,7 @@ public class Decoder implements PCMProcessor {
 		Thread decoderThread = new Thread(new Runnable() {
 			@Override
 			public void run() {
+                Log.d(TAG, "decoderThread.run()>");
 				try {
 					InputStream is = new FileInputStream(mSource);
 					FLACDecoder decoder = new FLACDecoder(is);
@@ -231,6 +247,7 @@ public class Decoder implements PCMProcessor {
 						mOnErrorListener.onError(null, MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO);
 					}
 				}
+                Log.d(TAG, "decoderThread.run()<");
 			}
 		});
 
@@ -238,6 +255,7 @@ public class Decoder implements PCMProcessor {
 	}
 
 	private void setupAudioTrack(StreamInfo streamInfo) {
+        Log.d(TAG, "setupAudioTrack()");
 		if (mAudioTrack != null) {
 			mAudioTrack.stop();
 			mAudioTrack.flush();
@@ -295,12 +313,6 @@ public class Decoder implements PCMProcessor {
 		// do nothing
 	}
 
-	private static final int MAX_BIT24 = 16777216;
-	private static final float STEP_BIT24 = 2f / MAX_BIT24;
-
-	private boolean decoding;
-	private boolean starting = false;
-
 	@Override
 	public void processPCM(ByteData pcm) {
 		if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
@@ -313,6 +325,7 @@ public class Decoder implements PCMProcessor {
 	private void processBytes(ByteData pcm) {
 		final byte[] data = pcm.getData();
 		final int dataSize = pcm.getLen();
+        Log.d(TAG, "processBytes(pcm) pcm len is" + dataSize);
 		final int buffSize = mAudioTrack.getBufferSizeInFrames();
 		int processed = 0;
 		while (decoding && processed < dataSize) {
@@ -337,6 +350,7 @@ public class Decoder implements PCMProcessor {
 	private void process24bits(ByteData pcm) {
 		final byte[] data = pcm.getData();
 		final int dataSize = pcm.getLen();
+        Log.d(TAG, "process24bits(pcm) pcm len is" + dataSize);
 		final int buffSize = mAudioTrack.getBufferSizeInFrames();
 		int processed = 0;
 		while (decoding && processed < dataSize) {
