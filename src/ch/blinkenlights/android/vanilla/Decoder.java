@@ -11,14 +11,15 @@ import android.media.MediaPlayer;
 import android.util.Log;
 
 import org.jflac.FLACDecoder;
-import org.jflac.PCMProcessor;
+import org.jflac.frame.Frame;
+import org.jflac.io.RandomFileInputStream;
 import org.jflac.metadata.StreamInfo;
 import org.jflac.util.ByteData;
 
 import static android.media.MediaPlayer.MEDIA_ERROR_IO;
 import static android.media.MediaPlayer.MEDIA_ERROR_UNKNOWN;
 
-public class Decoder implements PCMProcessor {
+public class Decoder {
 
 	private enum BitsPerSample {
 		UNKONOWN, BIT8, BIT16, BIT24, BIT32;
@@ -53,6 +54,9 @@ public class Decoder implements PCMProcessor {
 	private int mSessionId = 0;
 	private long mTotalSamples = 0;
 	private long mBufferedSamples = 0;
+    private int mPlaybackHeadPosition = 0;
+
+    private Thread decoderThread = null;
 
 	private MediaPlayer.OnErrorListener mOnErrorListener;
 	private MediaPlayer.OnCompletionListener mOnCompletionListener;
@@ -64,13 +68,17 @@ public class Decoder implements PCMProcessor {
 	public void stop() {
         Log.d(TAG, "stop()");
 
-		decoding = false;
-		mBufferedSamples = 0;
-		if (mAudioTrack != null) {
-			mAudioTrack.stop();
-			mAudioTrack.flush();
-		}
+		stopAudioTrack();
+		stopDecoding();
 	}
+
+    private void stopAudioTrack() {
+        if (mAudioTrack != null) {
+            mAudioTrack.stop();
+            mAudioTrack.flush();
+            mPlaybackHeadPosition = 0;
+        }
+    }
 
 	public void pause() {
         Log.d(TAG, "pause()");
@@ -78,7 +86,25 @@ public class Decoder implements PCMProcessor {
 		if (mAudioTrack != null) {
 			mAudioTrack.pause();
 		}
+
+		stopDecoding();
 	}
+
+    private void stopDecoding() {
+        if (decoderThread != null) {
+            decoding = false;
+            decoderThread.interrupt();
+
+            try {
+                decoderThread.join();
+                decoderThread = null;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        mBufferedSamples = 0;
+    }
 
 	public boolean isPlaying() {
 		boolean result = false;
@@ -107,7 +133,7 @@ public class Decoder implements PCMProcessor {
 	public int getCurrentPosition() {
 		int result = 0;
 
-		final int sampleRate = getPlaybackRate();
+		final int sampleRate = getSampleRate();
 		if (mAudioTrack != null && sampleRate > 0) {
 			final int headPosition = mAudioTrack.getPlaybackHeadPosition();
 			result = samplesToMs(headPosition, sampleRate);
@@ -120,7 +146,7 @@ public class Decoder implements PCMProcessor {
 	public int getDuration() {
 		int result = 0;
 
-		final int sampleRate = getPlaybackRate();
+		final int sampleRate = getSampleRate();
 		if (sampleRate > 0) {
 			result = samplesToMs(mTotalSamples, sampleRate);
 		}
@@ -139,7 +165,7 @@ public class Decoder implements PCMProcessor {
 
 	public int getPlaybackRate() {
 		int result = 0;
-		if (mAudioTrack != null) {
+		if (isPlaying()) {
 			result = mAudioTrack.getPlaybackRate();
 		}
 
@@ -149,7 +175,7 @@ public class Decoder implements PCMProcessor {
 	public String getBufferInfo() {
 		String result = "";
 
-		final int sampleRate = getPlaybackRate();
+		final int sampleRate = getSampleRate();
 		if (mAudioTrack != null && sampleRate > 0) {
 			int bufferedMs = samplesToMs(mBufferedSamples, sampleRate);
 			int position = getCurrentPosition();
@@ -218,7 +244,11 @@ public class Decoder implements PCMProcessor {
 
 	public void setSource(String source) throws IOException {
         Log.d(TAG, "setSource(" + source + ")");
-		mSource = source;
+
+        stopAudioTrack();
+		stopDecoding();
+
+        mSource = source;
 		decoding = false;
 		InputStream is = new FileInputStream(mSource);
 		FLACDecoder decoder = new FLACDecoder(is);
@@ -227,21 +257,32 @@ public class Decoder implements PCMProcessor {
 	}
 
 	public void play() {
-		mBufferedSamples = 0;
+		stopDecoding();
+
+        mBufferedSamples = 0;
 		decoding = true;
 		starting = true;
-		Thread decoderThread = new Thread(new Runnable() {
+
+		decoderThread = new Thread(new Runnable() {
 			@Override
 			public void run() {
                 Log.d(TAG, "decoderThread.run()>");
+                InputStream is = null;
 				try {
-					InputStream is = new FileInputStream(mSource);
-					FLACDecoder decoder = new FLACDecoder(is);
-					decoder.addPCMProcessor(Decoder.this);
-					decoder.decode();
-					decoding = false;
-					decoder.removePCMProcessor(Decoder.this);
-					is.close();
+                    is = new RandomFileInputStream(mSource);
+                    FLACDecoder decoder = new FLACDecoder(is);
+                    decoder.seek(mPlaybackHeadPosition);
+                    Log.d(TAG, "decoder.seek(" + mPlaybackHeadPosition +")");
+                    Frame frame = decoder.readNextFrame();
+                    ByteData pcm = decoder.decodeFrame(frame, null);
+                    processPCM(pcm);
+                    decoding = decoding && !decoder.isEOF() && frame != null;
+                    while (decoding) {
+                        frame = decoder.readNextFrame();
+                        pcm = decoder.decodeFrame(frame, pcm);
+                        processPCM(pcm);
+                        decoding = decoding && !decoder.isEOF() && frame != null;
+                    }
 				} catch (IOException ex) {
 					if (mOnErrorListener != null) {
 						mOnErrorListener.onError(null, MEDIA_ERROR_UNKNOWN, MEDIA_ERROR_IO);
@@ -308,12 +349,6 @@ public class Decoder implements PCMProcessor {
 		});
 	}
 
-	@Override
-	public void processStreamInfo(StreamInfo streamInfo) {
-		// do nothing
-	}
-
-	@Override
 	public void processPCM(ByteData pcm) {
 		if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
 			processBytes(pcm);
@@ -325,7 +360,7 @@ public class Decoder implements PCMProcessor {
 	private void processBytes(ByteData pcm) {
 		final byte[] data = pcm.getData();
 		final int dataSize = pcm.getLen();
-        Log.d(TAG, "processBytes(pcm) pcm len is" + dataSize);
+        Log.d(TAG, "processBytes(pcm) pcm len is " + dataSize);
 		final int buffSize = mAudioTrack.getBufferSizeInFrames();
 		int processed = 0;
 		while (decoding && processed < dataSize) {
@@ -350,7 +385,7 @@ public class Decoder implements PCMProcessor {
 	private void process24bits(ByteData pcm) {
 		final byte[] data = pcm.getData();
 		final int dataSize = pcm.getLen();
-        Log.d(TAG, "process24bits(pcm) pcm len is" + dataSize);
+        Log.d(TAG, "process24bits(pcm) pcm len is " + dataSize);
 		final int buffSize = mAudioTrack.getBufferSizeInFrames();
 		int processed = 0;
 		while (decoding && processed < dataSize) {
