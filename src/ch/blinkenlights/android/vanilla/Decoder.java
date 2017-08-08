@@ -146,10 +146,9 @@ public class Decoder {
     public int getCurrentPosition() {
         int result = 0;
 
-        final int sampleRate = getSampleRate();
-        if (mAudioTrack != null && sampleRate > 0) {
+        if (mAudioTrack != null) {
             final int headPosition = mAudioTrack.getPlaybackHeadPosition();
-            result = samplesToMs(headPosition, sampleRate);
+            result = samplesToMs(headPosition);
         }
 
         //Log.d(TAG, "getCurrentPosition() = " + result);
@@ -158,15 +157,7 @@ public class Decoder {
 
     // Track duration in ms
     public int getDuration() {
-        int result = 0;
-
-        final int sampleRate = getSampleRate();
-        if (sampleRate > 0) {
-            result = samplesToMs(mTotalSamples, sampleRate);
-        }
-
-        //Log.d(TAG, "getCurrentPosition() = " + result);
-        return result;
+        return samplesToMs(mTotalSamples);
     }
 
     public int getSampleRate() {
@@ -194,23 +185,27 @@ public class Decoder {
 
     private int bufferedAheadMs() {
         int result = 0;
-        final int sampleRate = getSampleRate();
-        if (sampleRate > 0) {
-            int offsetMs = samplesToMs(mSamplesOffset, sampleRate);
-            int bufferedMs = samplesToMs(mBufferedSamples, sampleRate);
-            int position = getCurrentPosition();
-            result = offsetMs + bufferedMs - position;
-        }
+
+        int offsetMs = samplesToMs(mSamplesOffset);
+        int bufferedMs = samplesToMs(mBufferedSamples);
+        int position = getCurrentPosition();
+        result = offsetMs + bufferedMs - position;
 
         return result;
     }
 
-    private int samplesToMs(int samples, int sampleRate) {
-        return samplesToMs(Long.valueOf(samples), sampleRate);
+    private int samplesToMs(int samples) {
+        return samplesToMs(Long.valueOf(samples));
     }
 
-    private int samplesToMs(long samples, int sampleRate) {
-        return (int) ((1000 * samples) / sampleRate);
+    private int samplesToMs(long samples) {
+        int result = 0;
+        final int sampleRate = getSampleRate();
+        if (sampleRate > 0) {
+            result = (int) ((1000 * samples) / sampleRate);
+        }
+
+        return result;
     }
 
     public String getBitsPerSample() {
@@ -409,10 +404,9 @@ public class Decoder {
                 if (mBitsPerSample == BitsPerSample.BIT8 || mBitsPerSample == BitsPerSample.BIT16) {
                     int len = pcm.getLen();
                     bytesBuffer.write(pcm.getData(), len);
-                    mBufferedSamples += len;
                     int freeBytes = bytesBuffer.getFreeBytes();
                     if (freeBytes < len) {
-                        Log.d(TAG, "writePCM(pcm): bytesBuffer is full");
+                        Log.d(TAG, "writePCM(pcm): stop fill bytesBuffer, size = " + bytesBuffer.size);
                         fillBuffer = false;
                     }
                 } else if (mBitsPerSample == BitsPerSample.BIT24) {
