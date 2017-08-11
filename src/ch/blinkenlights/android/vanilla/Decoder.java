@@ -273,14 +273,14 @@ public class Decoder {
                     FLACDecoder decoder = new FLACDecoder(is);
                     decoder.seek(mPlaybackHeadPosition);
                     Log.d(TAG, "decoder.seek(" + mPlaybackHeadPosition +")");
-                    Frame frame = decoder.readNextFrame();
-                    ByteData pcm = decoder.decodeFrame(frame, null);
-                    processPCM(pcm);
-                    decoding = decoding && !decoder.isEOF() && frame != null;
+                    Frame frame;
+                    ByteData pcm = null;
                     while (decoding) {
                         frame = decoder.readNextFrame();
-                        pcm = decoder.decodeFrame(frame, pcm);
-                        processPCM(pcm);
+                        if (frame != null) {
+                            pcm = decoder.decodeFrame(frame, pcm);
+                            processPCM(pcm);
+                        }
                         decoding = decoding && !decoder.isEOF() && frame != null;
                     }
 				} catch (IOException ex) {
